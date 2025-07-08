@@ -1,181 +1,211 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <meta charset="UTF-8">
-<title>持續專注力測試‧可自訂切換間隔</title>
+<title>持續專注力測試‧幾何圖形版</title>
 <style>
   body{margin:0;font-family:sans-serif;background:#f0f8ff;text-align:center}
   canvas{display:block;margin:0 auto;background:#f0f8ff}
-  button{width:160px;height:48px;margin:8px;border:0;border-radius:8px;background:#b0c4de;color:#fff;font-size:18px;cursor:pointer}
+  button{width:160px;height:48px;margin:8px;border:0;border-radius:8px;background:#b0c4de;color:#fff;font-size:18px;cursor:pointer;transition:transform .1s}
   button:hover{background:#778899}
+  button.pressed{transform:scale(0.9);filter:brightness(0.8);}
+  #score{display:inline-block;transition:transform .3s ease;}
+  #score.plus,#score.minus{animation:score-bounce .3s ease;}
+  #score.plus{color:#2e8b57;}
+  #score.minus{color:#d32f2f;}
+  @keyframes score-bounce{0%{transform:scale(1);}50%{transform:scale(1.4);}100%{transform:scale(1);}}
 </style>
 
 <canvas id="game" width="800" height="480"></canvas>
 <div>
   <span id="score">分數: 0</span>&emsp;<span id="timer">時間: 03:00</span><br><br>
-  <!-- A / S / D 對應三顆按鈕，順序：數字相同、兩者皆相同、Icon 相同 -->
   <button data-type="digit">A：數字相同</button>
   <button data-type="both">S：兩者皆相同</button>
-  <button data-type="icon">D：顏色相同</button>
+  <button data-type="icon">D：圖形相同</button>
 </div>
 
 <script>
 /***** 參數設定 *****/
-const ICON_SIZE       = 160;    // 圖示尺寸
-const GAME_DURATION   = 300;    // 遊戲秒數
-const SWITCH_INTERVAL = 3000;   // 題目顯示時間（毫秒）
-const FLASH_MS        = 300;    // 題目切換時閃光持續時間（毫秒）
-const FLASH_COLOR     = '#fffacd'; // 淡黃色，較白色更醒目
-const SCALE_MS        = 250;    // 放大縮小動畫時間
-const SCALE_FACTOR    = 1.3;    // 初始放大倍率
+const ICON_SIZE       = 160;     // 圖示尺寸
+const GAME_DURATION   = 300;     // 遊戲秒數
+const SWITCH_INTERVAL = 3000;    // 題目切換間隔（毫秒）
+const FLASH_MS        = 250;     // 閃光持續時間
+const HIGHLIGHT_MS    = 200;     // 使用者點擊後高亮持續時間
 
 /***** 畫布 & 基本變數 *****/
-const canvas = document.getElementById('game');
-const ctx    = canvas.getContext('2d');
-let score = 0,
-    startTime = Date.now(),
-    lastSwitch = Date.now(),
-    flashUntil = 0,
-    scaleUntil = 0,
-    playerAnswered = false;
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+let score=0,startTime=Date.now(),lastSwitch=Date.now(),flashUntil=0,playerAnswered=false;
+let highlightDigitUntil=0, highlightIconUntil=0;
 
-/***** AudioContext & 簡易提示音 *****/
-let audioCtx;
-function playBeep(){
-  if(!audioCtx) return; // 尚未解鎖 AudioContext
-  const osc  = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = 'square';
-  osc.frequency.value = 880;
-  gain.gain.value = 0.25;
-  osc.connect(gain); gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + 0.15);
-}
-function unlockAudio(){
-  if(!audioCtx){
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    audioCtx.resume();
-  }
-  window.removeEventListener('keydown', unlockAudio, {capture:true});
-  window.removeEventListener('mousedown', unlockAudio, {capture:true});
-}
-window.addEventListener('keydown', unlockAudio, {capture:true});
-window.addEventListener('mousedown', unlockAudio, {capture:true});
-
-/***** 動態產生 5 個彩色方塊作為圖示 *****/
-const icons = {},
-      colors = ['#ff5252', '#4caf50', '#2196f3', '#ffeb3b', '#e040fb'];
-colors.forEach((c, i) => {
-  const buf = document.createElement('canvas');
-  buf.width = buf.height = ICON_SIZE;
-  const bctx = buf.getContext('2d');
-  bctx.fillStyle = c;
-  bctx.fillRect(0, 0, ICON_SIZE, ICON_SIZE);
-  bctx.fillStyle = 'rgba(255,255,255,.2)';
-  bctx.font = 'bold 42px sans-serif';
-  bctx.textAlign = 'center';
-  bctx.textBaseline = 'middle';
-  bctx.fillText(String.fromCharCode(65 + i), ICON_SIZE / 2, ICON_SIZE / 2);
-  icons['icon' + i] = buf;
+/***** 產生幾何圖形 *****/
+const icons={},shapes=['circle','triangle','square','pentagon','star'];
+shapes.forEach(shape=>{
+  const buf=document.createElement('canvas');
+  buf.width=buf.height=ICON_SIZE;
+  const bctx=buf.getContext('2d');
+  drawShape(bctx,shape);
+  icons[shape]=buf;
 });
-const iconNames = Object.keys(icons);
+function drawShape(ctx,shape){
+  ctx.fillStyle='#87cefa';
+  ctx.strokeStyle='#2f4f4f';
+  ctx.lineWidth=6;
+  ctx.translate(ICON_SIZE/2,ICON_SIZE/2);
+  switch(shape){
+    case 'circle':
+      ctx.beginPath();
+      ctx.arc(0,0,ICON_SIZE*0.4,0,Math.PI*2);
+      ctx.fill();ctx.stroke();
+      break;
+    case 'triangle':
+      ctx.beginPath();
+      const r=ICON_SIZE*0.45;
+      ctx.moveTo(0,-r);
+      ctx.lineTo(r*Math.sin(Math.PI/3), r*Math.cos(Math.PI/3));
+      ctx.lineTo(-r*Math.sin(Math.PI/3), r*Math.cos(Math.PI/3));
+      ctx.closePath();
+      ctx.fill();ctx.stroke();
+      break;
+    case 'square':
+      ctx.beginPath();
+      const s=ICON_SIZE*0.55;
+      ctx.rect(-s/2,-s/2,s,s);
+      ctx.fill();ctx.stroke();
+      break;
+    case 'pentagon':
+      ctx.beginPath();
+      const r5=ICON_SIZE*0.45;
+      for(let i=0;i<5;i++){
+        const angle=-Math.PI/2 + i*2*Math.PI/5;
+        const x=r5*Math.cos(angle), y=r5*Math.sin(angle);
+        if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
+      ctx.fill();ctx.stroke();
+      break;
+    case 'star':
+      ctx.beginPath();
+      const outer=ICON_SIZE*0.45, inner=outer*0.45;
+      for(let i=0;i<10;i++){
+        const angle=-Math.PI/2 + i*Math.PI/5;
+        const len=i%2===0?outer:inner;
+        const x=len*Math.cos(angle), y=len*Math.sin(angle);
+        if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
+      ctx.fill();ctx.stroke();
+      break;
+  }
+  ctx.setTransform(1,0,0,1,0,0); // reset 變換矩陣
+}
+const iconNames=Object.keys(icons);
 
 /***** 遊戲邏輯 *****/
 let currentDigit, currentIcon, prevDigit, prevIcon;
 function newStimulus(){
-  prevDigit = currentDigit; prevIcon = currentIcon;
-  currentDigit = Math.random() < .2 && prevDigit !== undefined ? prevDigit : 1 + Math.floor(Math.random() * 9);
-  currentIcon = Math.random() < .2 && prevIcon  !== undefined ? prevIcon : iconNames[Math.random() * iconNames.length | 0];
-  // 閃光 & 動畫 & 音效
-  flashUntil = Date.now() + FLASH_MS;
-  scaleUntil = Date.now() + SCALE_MS;
-  playBeep();
+  prevDigit=currentDigit; prevIcon=currentIcon;
+  currentDigit=Math.random()<.2&&prevDigit!==undefined?prevDigit:1+Math.floor(Math.random()*9);
+  currentIcon=Math.random()<.2&&prevIcon!==undefined?prevIcon:iconNames[Math.random()*iconNames.length|0];
+  flashUntil=Date.now()+FLASH_MS;
+}
+function updateScoreDisplay(delta){
+  const el=document.getElementById('score');
+  el.textContent=`分數: ${score}`;
+  if(delta!==0){
+    el.classList.add(delta>0?'plus':'minus');
+    setTimeout(()=>el.classList.remove('plus','minus'),300);
+  }
 }
 function check(type){
   if(playerAnswered) return;
-  const dSame = currentDigit === prevDigit && prevDigit !== undefined;
-  const iSame = currentIcon === prevIcon && prevIcon !== undefined;
-  const needAnswer = dSame || iSame; // 是否需要作答
-  let correct = false;
-  if(type === 'digit' && dSame && !iSame)       correct = true;
-  else if(type === 'icon' && iSame && !dSame)   correct = true;
-  else if(type === 'both' && dSame && iSame)    correct = true;
-  else if(!needAnswer && type === undefined)    correct = true; // 不該作答且沒按鍵
-
+  const dSame=currentDigit===prevDigit&&prevDigit!==undefined;
+  const iSame=currentIcon===prevIcon&&prevIcon!==undefined;
+  let needAnswer=dSame||iSame;
+  let correct=false, delta=0;
+  if(type==='digit'&&dSame&&!iSame) {correct=true;}
+  else if(type==='icon'&&iSame&&!dSame) {correct=true;}
+  else if(type==='both'&&dSame&&iSame) {correct=true;}
+  else if(!needAnswer&&type===undefined) {correct=true;}
+  // 評分
   if(needAnswer){
-      score += correct ? 1 : -1;
+      delta = correct?1:-1;
+      score += delta;
   }else{
-      if(type !== undefined) score -= 1; // 誤按扣分
+      if(type!==undefined){delta=-1; score+=delta;}
   }
-  document.getElementById('score').textContent = `分數: ${score}`;
-  playerAnswered = true;
+  updateScoreDisplay(delta);
+  // 點擊動畫
+  const now=Date.now();
+  if(type==='digit') highlightDigitUntil=now+HIGHLIGHT_MS;
+  else if(type==='icon') highlightIconUntil=now+HIGHLIGHT_MS;
+  else if(type==='both'){highlightDigitUntil=now+HIGHLIGHT_MS; highlightIconUntil=now+HIGHLIGHT_MS;}
+  // 按鈕壓下動畫
+  if(type){
+    const btn=document.querySelector(`button[data-type="${type}"]`);
+    if(btn){
+      btn.classList.add('pressed');
+      setTimeout(()=>btn.classList.remove('pressed'),150);
+    }
+  }
+  playerAnswered=true;
 }
 
 /***** 主迴圈 *****/
 function loop(){
-  const now = Date.now();
-  const elapsed = (now - startTime) / 1000;
-  const remain  = Math.max(0, GAME_DURATION - elapsed);
-  document.getElementById('timer').textContent = `時間: ${String(Math.floor(remain / 60)).padStart(2,'0')}:${String(Math.floor(remain % 60)).padStart(2,'0')}`;
-
+  const now=Date.now();
+  const elapsed=(now-startTime)/1000;
+  const remain=Math.max(0,GAME_DURATION-elapsed);
+  document.getElementById('timer').textContent=`時間: ${String(Math.floor(remain/60)).padStart(2,'0')}:${String(Math.floor(remain%60)).padStart(2,'0')}`;
   // 題目切換
-  if(now - lastSwitch >= SWITCH_INTERVAL){
-      const needAnswer = (currentDigit === prevDigit && prevDigit !== undefined) || (currentIcon === prevIcon && prevIcon !== undefined);
-      if(needAnswer && !playerAnswered){ // 應作答未作答扣分
-          score--; document.getElementById('score').textContent = `分數: ${score}`;
+  if(now-lastSwitch>=SWITCH_INTERVAL){
+      const needAnswer=(currentDigit===prevDigit&&prevDigit!==undefined)||(currentIcon===prevIcon&&prevIcon!==undefined);
+      if(needAnswer && !playerAnswered){
+          score--; updateScoreDisplay(-1);
       }
-      playerAnswered = false;
+      playerAnswered=false;
       newStimulus();
-      lastSwitch = now;
+      lastSwitch=now;
   }
-
   // 畫面刷新
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // 閃光背景
-  if(now < flashUntil){
-      ctx.fillStyle = FLASH_COLOR;
+  // 閃光
+  if(now<flashUntil){
+      ctx.fillStyle='#fffacd';
       ctx.fillRect(0,0,canvas.width,canvas.height);
   }
-  // 計算縮放
-  let scale = 1;
-  if(now < scaleUntil){
-      const p = 1 - (scaleUntil - now) / SCALE_MS; // 0→1
-      scale = SCALE_FACTOR - (SCALE_FACTOR - 1) * p; // 從 SCALE_FACTOR 緩回 1
-  }
   // 畫數字
-  if(currentDigit !== undefined){
+  const digitX=canvas.width/4, digitY=canvas.height/2;
+  ctx.fillStyle='#2f4f4f';
+  ctx.font='160px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+  if(currentDigit!==undefined){
+      const scale=now<highlightDigitUntil?1.2:1;
       ctx.save();
-      ctx.translate(canvas.width / 4, canvas.height / 2);
-      ctx.scale(scale, scale);
-      ctx.fillStyle = '#2f4f4f';
-      ctx.font = `${160}px sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(currentDigit, 0, 0);
+      ctx.translate(digitX,digitY);
+      ctx.scale(scale,scale);
+      ctx.fillText(currentDigit,0,0);
       ctx.restore();
   }
-  // 畫 icon
-  const img = icons[currentIcon];
+  // 畫圖形
+  const img=icons[currentIcon];
   if(img){
-      ctx.save();
-      ctx.translate(canvas.width * 0.65, canvas.height / 2 - ICON_SIZE / 2 * scale);
-      ctx.scale(scale, scale);
-      ctx.drawImage(img, -ICON_SIZE/2, 0, ICON_SIZE, ICON_SIZE);
-      ctx.restore();
+      const scale=now<highlightIconUntil?1.2:1;
+      const w=ICON_SIZE*scale, h=w;
+      const imgX=canvas.width*0.65, imgY=canvas.height/2-h/2;
+      ctx.drawImage(img,imgX,imgY,w,h);
   }
-
-  if(remain > 0) requestAnimationFrame(loop); else alert(`遊戲結束！你的分數：${score}`);
+  if(remain>0) requestAnimationFrame(loop); else alert(`遊戲結束！你的分數：${score}`);
 }
 
 /***** 事件繫結 *****/
-document.querySelectorAll('button').forEach(b => {
-  b.onclick = () => check(b.dataset.type);
+document.querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>check(b.dataset.type);
 });
-window.addEventListener('keydown', e => {
+window.addEventListener('keydown',e=>{
   if(e.repeat) return;
-  const key = e.key.toLowerCase();
-  if(key === 'a')      check('digit');
-  else if(key === 's') check('both');
-  else if(key === 'd') check('icon');
+  const key=e.key.toLowerCase();
+  if(key==='a')      check('digit');
+  else if(key==='s') check('both');
+  else if(key==='d') check('icon');
 });
 
 /***** 開始遊戲 *****/
